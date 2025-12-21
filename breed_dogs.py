@@ -6,67 +6,71 @@ from settings import yd_token
 
 
 BREED = input("Введите породу собаки на английском языке: ").lower()
-DISK_BASE_PATH = f"/{BREED.capitalize()}_Images"
 
-def get_dog_images(breed):
-    sub_breed_url = f"https://dog.ceo/api/breed/{breed}/list"
-    response = requests.get(sub_breed_url)
-    response.raise_for_status()
-    data = response.json()
-    sub_breeds = data.get("message", [])
-    image_urls = []
-    for sub in sub_breeds:
-        url = f"https://dog.ceo/api/breed/{breed}/{sub}/images/random"
-        resp = requests.get(url)
-        resp.raise_for_status()
-        img_data = resp.json()
-        img_url = img_data["message"]
-        if img_url:
-            image_urls.append({"sub_breed": sub, "url": img_url})
-    return image_urls
 
-def create_folder_on_disk(token, path):
-    url = "https://cloud-api.yandex.net/v1/disk/resources"
-    headers = {"Authorization": f"OAuth {token}"}
-    params = {"path": path}
-    response = requests.put(url, headers=headers, params=params)
-    response.raise_for_status()
+class YDiskUploader:
+    def __init__(self, token):
+        self.token = token
 
-def upload_image_to_disk(token, url, file_name, folder_path):
-    upload_url = "https://cloud-api.yandex.net/v1/disk/resources/upload"
-    headers = {"Authorization": f"OAuth {token}"}
-    file_path = f"{folder_path}/{file_name}"
-    params = {
-        "path": file_path,
-        "url": url,
-        "overwrite": "true"
-    }
-    response = requests.post(upload_url, headers=headers, params=params)
-    response.raise_for_status()
+    def create_folder_on_disk(self, folder_name):
+        url = 'https://cloud-api.yandex.net/v1/disk/resources'
+        headers = {'Authorization': f'OAuth {self.token}'}
+        params = {'path': folder_name}
+        response = requests.put(url, headers=headers, params=params)
+        if response.status_code in (200, 201):
+            print(f"Папка '{folder_name}' создана на Яндекс.Диске")
+        else:
+            print(f"Папка '{folder_name}' уже существует на Яндекс.Диске")
 
-def main():
-    images = get_dog_images(BREED)
-    create_folder_on_disk(yd_token, DISK_BASE_PATH)
-    results = []
-    for item in tqdm(images, desc="Загрузка изображений", unit="file"):
-        url = item["url"]
-        sub_breed = item["sub_breed"] or BREED
-        file_name = f"{sub_breed}_{url.split('/')[-1]}"
-        success = upload_image_to_disk(yd_token, url, file_name, DISK_BASE_PATH)
-        result_entry = {
-            "file_name": file_name,
-            "url": url,
-            "disk_path": f"{DISK_BASE_PATH}/{file_name}",
-            "uploaded": success,
-            "timestamp": time.time()
-        }
-        results.append(result_entry)
-        time.sleep(0.5)
-    with open("results.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=4)
+    def upload_dog_images(self, upload_folder):
+        sub_breed_url = f"https://dog.ceo/api/breed/{BREED}/list"
+        response = requests.get(sub_breed_url)
+        response.raise_for_status()
+        sub_breeds = response.json()["message"]
 
-if __name__ == "__main__":
-    main()
+        image_urls = []
+        if sub_breeds:
+            print(f"Подпороды найдены: {sub_breeds}")
+            for sub in sub_breeds:
+                url = f"https://dog.ceo/api/breed/{BREED}/{sub}/images/random"
+                resp = requests.get(url)
+                resp.raise_for_status()
+                img_url = resp.json()["message"]
+                if img_url:
+                    image_urls.append((sub, img_url))
+        else:
+            print("Подпород нет. Загружаем изображение основной породы.")
+            url = f"https://dog.ceo/api/breed/{BREED}/images/random"
+            resp = requests.get(url)
+            resp.raise_for_status()
+            img_url = resp.json()["message"]
+            if img_url:
+                image_urls.append((BREED, img_url))
+
+        results = []
+        for sub, img_url in tqdm(image_urls, desc="Загрузка изображений"):
+            url_upload = 'https://cloud-api.yandex.net/v1/disk/resources/upload'
+            file_name = f"{sub}_{img_url.split('/')[-1]}"
+            disk_path = f"{upload_folder}/{file_name}"
+            params = {'path': disk_path, 'url': img_url}
+            headers = {'Authorization': yd_token}
+            response = requests.post(url_upload, params=params, headers=headers)
+            response.raise_for_status()
+            results.append({
+                "file_name": file_name,
+                "url": img_url,
+            })
+
+            time.sleep(1)
+
+        with open("results.json", "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=4)
+
+        print("результат сохранён в results.json")
+
+loader = YDiskUploader(yd_token)
+loader.create_folder_on_disk(BREED)
+loader.upload_dog_images(BREED)
 
 
 
